@@ -32,7 +32,7 @@ from pyquil._parser.PyQuilListener import run_parser
 from pyquil.noise import _check_kraus_ops, _create_kraus_pragmas, pauli_kraus_map
 from pyquil.parameters import format_parameter
 from pyquil.quilatom import (LabelPlaceholder, QubitPlaceholder, unpack_qubit, Addr,
-                             unpack_classical_reg, MemoryReference)
+                             unpack_classical_reg, MemoryReference, Expression)
 from pyquil.gates import MEASURE, QUANTUM_GATES, H, RESET
 from pyquil.quilbase import (DefGate, Gate, Measurement, Pragma, AbstractInstruction, Qubit,
                              Jump, Label, JumpConditional, JumpTarget, JumpUnless, JumpWhen,
@@ -500,10 +500,11 @@ class Program(object):
 
     def is_protoquil(self):
         """
-        Protoquil programs may only contain gates, Pragmas, and final global RESETs. It may not
-        contain classical instructions or jumps.
+        Return True if this is ProtoQuil. ProtoQuil means the program only contains an
+        optional initial global RESET, gates, Pragmas, Declares, and final MEASUREs. The
+        program may not contain classical instructions or jumps.
 
-        :return: True if the Program is Protoquil, False otherwise
+        :return: True if the Program is ProtoQuil, False otherwise
         """
         try:
             validate_protoquil(self)
@@ -532,7 +533,7 @@ class Program(object):
 
         """
         if not self.is_protoquil():
-            raise ValueError("Program must be valid Protoquil")
+            raise ValueError("Program must be valid ProtoQuil")
 
         daggered = Program()
 
@@ -988,25 +989,24 @@ def percolate_declares(program: Program) -> Program:
 def validate_protoquil(program: Program) -> None:
     """
     Ensure that a program is valid ProtoQuil, otherwise raise a ValueError.
-    Protoquil allows a global RESET before any gates, and MEASUREs on each qubit after any gates
+    ProtoQuil allows a global RESET before any gates, and MEASUREs on each qubit after any gates
     on that qubit. Pragmas are always allowed, and a final Halt instruction is allowed.
 
     :param program: The Quil program to validate.
     """
     gates_seen = False
-    halted = False
     measured_qubits = set()
-    for instr in program.instructions:
+    for idx, instr in enumerate(program.instructions):
         if isinstance(instr, Pragma) or isinstance(instr, Declare):
             continue
         elif isinstance(instr, Halt):
-            halted = True
-        elif halted:
-            raise ValueError(f"Cannot have instruction {instr} after HALT")
+            if idx + 1 != len(program.instructions):
+                raise ValueError(f"Cannot have instruction {instr} after HALT")
         elif isinstance(instr, Gate):
             gates_seen = True
             if any(q.index in measured_qubits for q in instr.qubits):
                 raise ValueError("Cannot apply gates to qubits that were already measured.")
+            validate_gate_params(instr)
         elif isinstance(instr, Reset):
             if gates_seen:
                 raise ValueError("ProtoQuil disallows RESET after a gate application.")
@@ -1015,4 +1015,40 @@ def validate_protoquil(program: Program) -> None:
         elif isinstance(instr, Measurement):
             measured_qubits.add(instr.qubit.index)
         else:
-            raise ValueError(f"Unhandled instruction type in ProtoQuil validation: {instr}")
+            raise ValueError(f"Unhandled instruction in ProtoQuil validation: {instr}")
+
+
+def validate_gate_params(gate: Gate) -> None:
+    """
+    Ensure that gate parameters are in a format that can be processed by hardware, otherwise
+    raise a ValueError. In particular, any multiplication must have a power of 2 prefactor.
+
+    :param gate: A single gate instruction to validate.
+    """
+    for param in gate.params:
+        if isinstance(param, int) or isinstance(param, float):
+            continue
+        if isinstance(param, MemoryReference):
+            continue
+        if isinstance(param, Expression):
+            if param.operator is "-" or param.operator is "+":
+                validate_gate_params(param.op1)
+                validate_gate_params(param.op2)
+            elif param.operator is "*":
+                if isinstance(param.op1, MemoryReference) \
+                        or isinstance(param.op2, MemoryReference):
+                    continue
+                if isinstance(param.op1, int) or isinstance(param.op1, float):
+                    if int(np.log2(param.op1)) == np.log2(param.op1):
+                        continue
+                elif isinstance(param.op2, int) or isinstance(param.op2, float):
+                    if int(np.log2(param.op2)) == np.log2(param.op2):
+                        continue
+                # TODO handle Expressions
+                raise ValueError("Cannot do general arithmetic in gate parameter:"
+                                 f"{gate}({param.op1} * {param.op2}).")
+            else:
+                raise ValueError("Quil gate contained a parameter with unsupported arithmetic: "
+                                 f"{gate}.")
+        else:
+            raise ValueError(f"Quil gate contained an unrecognized parameter: {gate}.")

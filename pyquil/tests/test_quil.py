@@ -1116,3 +1116,10 @@ CZ 2 3
 MEASURE 2 ro[2]
 MEASURE 3 ro[3]
 """))
+
+
+def test_validate_protoquil_with_params():
+    validate_protoquil(Program("""
+DECLARE theta INTEGER[1]
+RZ(4*%theta) 0
+"""))
