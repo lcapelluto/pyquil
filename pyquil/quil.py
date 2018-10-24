@@ -32,7 +32,8 @@ from pyquil._parser.PyQuilListener import run_parser
 from pyquil.noise import _check_kraus_ops, _create_kraus_pragmas, pauli_kraus_map
 from pyquil.parameters import format_parameter
 from pyquil.quilatom import (LabelPlaceholder, QubitPlaceholder, unpack_qubit, Addr,
-                             unpack_classical_reg, MemoryReference, Expression)
+                             unpack_classical_reg, MemoryReference, Expression, Parameter,
+                             BinaryExp, Add, Sub, Mul)
 from pyquil.gates import MEASURE, QUANTUM_GATES, H, RESET
 from pyquil.quilbase import (DefGate, Gate, Measurement, Pragma, AbstractInstruction, Qubit,
                              Jump, Label, JumpConditional, JumpTarget, JumpUnless, JumpWhen,
@@ -1006,7 +1007,7 @@ def validate_protoquil(program: Program) -> None:
             gates_seen = True
             if any(q.index in measured_qubits for q in instr.qubits):
                 raise ValueError("Cannot apply gates to qubits that were already measured.")
-            validate_gate_params(instr)
+            validate_gate(instr)
         elif isinstance(instr, Reset):
             if gates_seen:
                 raise ValueError("ProtoQuil disallows RESET after a gate application.")
@@ -1015,40 +1016,60 @@ def validate_protoquil(program: Program) -> None:
         elif isinstance(instr, Measurement):
             measured_qubits.add(instr.qubit.index)
         else:
-            raise ValueError(f"Unhandled instruction in ProtoQuil validation: {instr}")
+            raise ValueError(f"Malformed instruction in ProtoQuil validation: {instr}")
 
 
-def validate_gate_params(gate: Gate) -> None:
+def validate_gate(gate: Gate) -> None:
     """
-    Ensure that gate parameters are in a format that can be processed by hardware, otherwise
-    raise a ValueError. In particular, any multiplication must have a power of 2 prefactor.
+    Ensure that a gate adheres to valid ProtoQuil rules by checking each of its parameters,
+    otherwise raise a ValueError.
 
     :param gate: A single gate instruction to validate.
     """
     for param in gate.params:
-        if isinstance(param, int) or isinstance(param, float):
-            continue
-        if isinstance(param, MemoryReference):
-            continue
-        if isinstance(param, Expression):
-            if param.operator is "-" or param.operator is "+":
-                validate_gate_params(param.op1)
-                validate_gate_params(param.op2)
-            elif param.operator is "*":
-                if isinstance(param.op1, MemoryReference) \
-                        or isinstance(param.op2, MemoryReference):
-                    continue
-                if isinstance(param.op1, int) or isinstance(param.op1, float):
-                    if int(np.log2(param.op1)) == np.log2(param.op1):
-                        continue
-                elif isinstance(param.op2, int) or isinstance(param.op2, float):
-                    if int(np.log2(param.op2)) == np.log2(param.op2):
-                        continue
-                # TODO handle Expressions
-                raise ValueError("Cannot do general arithmetic in gate parameter:"
-                                 f"{gate}({param.op1} * {param.op2}).")
+        try:
+            validate_gate_params(param)
+        except ValueError as e:
+            raise ValueError(f"Invalid gate `{gate}`: {e}")
+
+
+def validate_gate_params(param: Expression) -> None:
+    """
+    Ensure that parameter is in a format that can be processed by hardware, otherwise raise
+    a ValueError. In particular, any multiplication must have a power of 2 prefactor.
+
+    :param param: A parameter within a gate to validate.
+    """
+    if isinstance(param, int) or isinstance(param, float):
+        return
+    if isinstance(param, MemoryReference):
+        return
+    if isinstance(param, Parameter):
+        return
+    if isinstance(param, BinaryExp):
+        if isinstance(param, Add) or isinstance(param, Sub):
+            validate_gate_params(param.op1)
+            validate_gate_params(param.op2)
+        elif isinstance(param, Mul):
+            if isinstance(param.op1, MemoryReference) \
+                    or isinstance(param.op2, MemoryReference):
+                return
+            if isinstance(param.op1, int) or isinstance(param.op1, float):
+                if int(np.log2(param.op1)) == np.log2(param.op1):
+                    return
+            elif isinstance(param.op2, int) or isinstance(param.op2, float):
+                if int(np.log2(param.op2)) == np.log2(param.op2):
+                    return
             else:
-                raise ValueError("Quil gate contained a parameter with unsupported arithmetic: "
-                                 f"{gate}.")
+                if isinstance(param.op2, Expression):
+                    param.op1, param.op2 = param.op2, param.op1
+                if isinstance(param.op1, Expression):
+                    if isinstance(param.op2, int) or isinstance(param.op2, float) \
+                        and int(np.log2(param.op2)) == np.log2(param.op2):
+                        return validate_gate_params(param.op1)
+            raise ValueError("Cannot do general arithmetic in gate parameter. "
+                             "Multipliers need to be a power of two.")
         else:
-            raise ValueError(f"Quil gate contained an unrecognized parameter: {gate}.")
+            raise ValueError("Quil gate contained a parameter with unsupported arithmetic.")
+    else:
+        raise ValueError("Quil gate contained a malformed parameter.")

@@ -1123,3 +1123,66 @@ def test_validate_protoquil_with_params():
 DECLARE theta INTEGER[1]
 RZ(4*%theta) 0
 """))
+    validate_protoquil(Program("""
+DECLARE theta INTEGER[1]
+RZ(%theta*8) 0
+    """))
+    validate_protoquil(Program("""
+DECLARE theta INTEGER[1]
+RZ(0.5*%theta) 0
+"""))
+    validate_protoquil(Program("""
+DECLARE theta INTEGER[1]
+RZ(0.25*%theta + %theta) 0
+"""))
+
+
+def test_validate_with_non_power_of_two():
+    with pytest.raises(ValueError):
+        validate_protoquil(Program("""
+DECLARE theta INTEGER[1]
+RZ(0.6*%theta) 0
+"""))
+    with pytest.raises(ValueError):
+        validate_protoquil(Program("""
+DECLARE theta INTEGER[1]
+RZ(3*%theta) 0
+"""))
+    with pytest.raises(ValueError):
+        validate_protoquil(Program("""
+DECLARE theta INTEGER[1]
+RZ(%theta * %theta) 0
+"""))
+
+
+def test_validate_unsupported_arithmetic():
+    with pytest.raises(ValueError):
+        validate_protoquil(Program("""
+DECLARE theta INTEGER[1]
+RZ(%theta/2) 0
+"""))
+
+
+def test_validate_memory_ref():
+    validate_protoquil(Program("""
+RZ(test) 0
+"""))
+    validate_protoquil(Program("""
+RZ(test0 * test1) 0
+"""))
+
+
+def test_validate_expression():
+    validate_protoquil(Program("""
+RZ(2.0 * (%c + %a)) 0
+"""))
+    validate_protoquil(Program("""
+RZ(%a * (3 + 4)) 0
+"""))
+    validate_protoquil(Program("""
+RZ(2.0 * (0.5 * %c + %a) * 8) 0
+"""))
+    with pytest.raises(ValueError):
+        validate_protoquil(Program("""
+RZ(2.0 * (0.5 * %c + %a) * (8 * 2.0 * %a)) 0
+"""))
