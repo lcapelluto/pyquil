@@ -121,7 +121,47 @@ number as an argument.
 
 Declaring Memory
 ~~~~~~~~~~~~~~~~
-*Coming soon*
+
+Classical memory regions must be explicitly requested and named by a Quil program using the ``DECLARE`` directive.
+Details about the Quil directive can be found in :ref:`declare`.
+
+
+
+
+In pyQuil, we declare memory with the ``.declare`` method on a ``Program``. Let's inspect the function signature:
+
+.. code:: python
+
+    # pyquil.quil.Program
+
+    def declare(self, name, memory_type='BIT', memory_size=1, shared_region=None, offsets=None):
+
+Let's break down each argument:
+ -  ``name`` is any name you want to give this memory region.
+ -  ``memory_type`` is one of ``'REAL'``, ``'BIT'``, ``'OCTET'``, or ``'INTEGER'`` (as a string). Only ``BIT`` and
+    ``OCTET`` always have a determined size, which is 1 bit and 8 bits, respectively.
+ -  ``memory_size`` is the number of that memory type to allocate.
+ -  ``shared_region`` and ``offsets`` are advanced methods that would allow you to alias memory regions. For example,
+    you might want to name the third bit in your readout array as ``q3_ro``. ``SHARING`` is currently disallowed for
+    our QPUs, so we won't focus on this.
+
+Now we can get into an example.
+
+.. code:: python
+
+    from pyquil import Program
+
+    p = Program()
+    theta = p.declare('theta', 'REAL')
+    ro = p.declare('ro', 'BIT', 16)
+
+How is our Quil looking?
+
+.. parsed-literal::
+
+    
+
+
 
 
 Measurement
@@ -141,6 +181,10 @@ Parametric Compilation
 *Coming soon*
 
 
+
+Gate Modifiers
+~~~~~~~~~~~~~~
+`DAGGER` `CONTROLLED`
 
 Defining New Gates
 ~~~~~~~~~~~~~~~~~~
